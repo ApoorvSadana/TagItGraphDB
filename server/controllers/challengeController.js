@@ -10,7 +10,7 @@ async function createChallenge(req, res) {
       "CREATE (challenge:Challenge {id:$id,hashtag:$hashtag,live:$live,\
                 shortDesc:$shortDesc,longDesc:$longDesc,poweredBy:$poweredBy,\
                 poweredByUrl:$poweredByUrl,backgroundUrl:$backgroundUrl,donationPerUser:$donationPerUser,\
-                currencyCode:$currencyCode})",
+                currencyCode:$currencyCode,upperCap:$upperCap})",
       {
         id: id,
         hashtag: data.hashtag,
@@ -22,6 +22,7 @@ async function createChallenge(req, res) {
         backgroundUrl: data.backgroundUrl,
         donationPerUser: data.donationPerUser,
         currencyCode: data.currencyCode,
+        upperCap: data.upperCap,
       }
     );
     await session.close();

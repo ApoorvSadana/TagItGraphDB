@@ -235,22 +235,45 @@ async function addPhoneNumber(req, res) {
 
 async function participateInChallenge(req, res) {
   try {
+    console.log("HI!");
     let data = req.body;
     const session = driver.session();
-    await session.run(
-      "MATCH (user:User {id:$userId}), (challenge:Challenge {id:$challengeId}) \
-      MERGE (user)-[:participated {timestamp:$timestamp}]->(challenge) ",
-      {
-        userId: data.userId,
-        challengeId: data.challengeId,
-        timestamp: new Date().getTime().toString(),
-      }
-    );
+    let tx = session.beginTransaction();
     let promises = [];
-    data.invites.map((phoneNumber) => {
-      promises.push(tagUser(data.userId, data.challengeId, phoneNumber));
-    });
+    promises.push(
+      tx.run(
+        "MATCH (user:User {id:$userId}), (challenge:Challenge {id:$challengeId}) \
+      MERGE (user)-[:participated {timestamp:$timestamp, attributed:$attributed}]->(challenge)",
+        {
+          userId: data.userId,
+          challengeId: data.challengeId,
+          timestamp: new Date().getTime().toString(),
+          attributed: false,
+        }
+      )
+    );
+    promises.push(
+      tx.run(
+        `MATCH (user:User {id:$userId}), (challenge:Challenge {id:$challengeId}),  \
+            (tagger:User)-[:tagged {challengeId:$challengeId}]->(user), \
+           (tagger)-[r:participated {attributed:${false}}]->(challenge) \
+            SET r.attributed=${true}`,
+        {
+          userId: data.userId,
+          challengeId: data.challengeId,
+        }
+      )
+    );
     await Promise.all(promises);
+    await tx.commit();
+    console.log("HI222!");
+    let promises2 = [];
+    data.invites.map((phoneNumber) => {
+      promises2.push(tagUser(data.userId, data.challengeId, phoneNumber));
+    });
+    await Promise.all(promises2);
+    console.log("HI333 !");
+    // await tx.commit();
     await session.close();
     res.sendStatus(200);
   } catch (err) {
@@ -263,6 +286,7 @@ async function tagUser(userId, challengeId, taggedPhoneNumber) {
   try {
     const session = driver.session();
     let tx = session.beginTransaction();
+    console.log("HI444!");
     let taggedUser = await tx.run(
       "MATCH (user:User {phoneNumber:$phoneNumber}) RETURN user",
       {
@@ -270,6 +294,7 @@ async function tagUser(userId, challengeId, taggedPhoneNumber) {
       }
     );
     if (taggedUser.records.length === 0) {
+      console.log("HI55!" + taggedPhoneNumber);
       await tx.run(
         "MERGE (tag:TaggedNotOnApp {phoneNumber:$phoneNumber}) \
         WITH tag \
@@ -281,6 +306,7 @@ async function tagUser(userId, challengeId, taggedPhoneNumber) {
           challengeId: challengeId,
         }
       );
+      console.log("HI4666!");
       await tx.commit();
     } else {
       let result = await tx.run(
@@ -292,6 +318,7 @@ async function tagUser(userId, challengeId, taggedPhoneNumber) {
         }
       );
       let alreadyParticipated = result.records[0]._fields[0];
+      console.log(alreadyParticipated);
       if (alreadyParticipated === true) {
         await tx.commit();
         return false;
@@ -311,11 +338,11 @@ async function tagUser(userId, challengeId, taggedPhoneNumber) {
     return true;
   } catch (err) {
     console.error(err);
-    return -1;
+    throw err;
   }
 }
 
-async function getTaggingTree(req, res) {
+async function getTaggingTree(userId, challengeId) {
   try {
     const session = driver.session();
     let tx = session.beginTransaction();
@@ -327,18 +354,139 @@ async function getTaggingTree(req, res) {
     //   }
     // );
     let result = await tx.run(
-      "MATCH p=(root:User {id:$userId})-[r:tagged*]->(n),\
-      (challenge:Challenge {id:$challengeId}) WHERE (n)-[:participated]->(challenge) \
+      `MATCH p=(root:User {id:$userId})-[r:tagged*]->(n),\
+      (challenge:Challenge {id:$challengeId}) WHERE (n)-[:participated ]->(challenge) \
       WITH n, LENGTH(p) AS depth \
-      RETURN COLLECT([n, depth])",
+      RETURN COLLECT([n.id,n.name,n.profilePicUrl,depth])`,
       {
-        userId: req.body.userId,
-        challengeId: req.body.challengeId,
+        userId: userId,
+        challengeId: challengeId,
       }
     );
     await tx.commit();
     await session.close();
-    res.status(200).send(result.records[0]._fields);
+    return result.records[0]._fields[0];
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+async function getDashboard(req, res) {
+  try {
+    const session = driver.session();
+    let tx = session.beginTransaction();
+    let promises = [];
+    let responseObj = {};
+    promises.push(
+      tx.run("MATCH (user:User {id:$id}) RETURN user", {
+        id: req.body.userId,
+      })
+    );
+    promises.push(
+      tx.run("MATCH (challenge:Challenge {live:$live}) RETURN challenge", {
+        live: true,
+      })
+    );
+    promises.push(
+      tx.run(
+        "MATCH (challenge:Challenge),(user:User {id:$userId}) \
+            WHERE (user)-[:participated]->(challenge) \
+            RETURN challenge",
+        {
+          userId: req.body.userId,
+        }
+      )
+    );
+    let [user, liveChallenges, doneChallenges] = await Promise.all(promises);
+    responseObj["user"] = user.records[0]._fields[0].properties;
+    responseObj["liveChallenges"] = {};
+    liveChallenges.records.map((challenge) => {
+      responseObj["liveChallenges"][challenge._fields[0].properties.id] =
+        challenge._fields[0].properties;
+    });
+    responseObj["dashboard"] = {};
+    let promises2 = [];
+    doneChallenges.records.map((challenge) => {
+      async function getChallengeStats(challenge) {
+        let challengeId = challenge._fields[0].properties.id;
+        let challengeProperties = challenge._fields[0].properties;
+        let promises3 = [];
+        promises3.push(
+          tx.run(
+            `MATCH (challenge:Challenge {id:$challengeId}),\
+                    (user:User)-[:participated {attributed:${true}}]->(challenge)\
+                    RETURN COUNT(DISTINCT user)`,
+            {
+              challengeId: challengeId,
+            }
+          )
+        );
+        promises3.push(
+          tx.run(
+            `MATCH (challenge:Challenge {id:$challengeId}),\
+                      (user:User)-[:participated]->(challenge)\
+                      RETURN COUNT(DISTINCT user)`,
+            {
+              challengeId: challengeId,
+            }
+          )
+        );
+        promises3.push(getTaggingTree(req.body.userId, challengeId));
+        let [
+          participantsAttributed,
+          totalParticipants,
+          taggingTree,
+        ] = await Promise.all(promises3);
+        responseObj["dashboard"][challengeId] = challengeProperties;
+        responseObj["dashboard"][challengeId].amountRaised =
+          Number(challengeProperties.donationPerUser) *
+          Number(participantsAttributed.records[0]._fields[0].low);
+        responseObj["dashboard"][challengeId].attemptsAttributed = Number(
+          participantsAttributed.records[0]._fields[0].low
+        );
+        responseObj["dashboard"][challengeId].participants = Number(
+          totalParticipants.records[0]._fields[0].low
+        );
+        responseObj["dashboard"][challengeId]["firstConnection"] = [];
+        responseObj["dashboard"][challengeId]["secondConnection"] = [];
+        responseObj["dashboard"][challengeId]["thirdConnection"] = [];
+        console.log(taggingTree);
+        let addedUsers = [];
+        taggingTree.map((user, index) => {
+          console.log("START-" + index);
+          let depth = user[3].low;
+          let userId = user[0];
+          let profileObj = {
+            userId: userId,
+            name: user[1],
+            profilePicUrl: user[2],
+          };
+          if (addedUsers.includes(userId)) {
+            return null;
+          }
+          addedUsers.push(userId);
+          if (depth == 1) {
+            responseObj["dashboard"][challengeId]["firstConnection"].push(
+              profileObj
+            );
+          } else if (depth == 2) {
+            responseObj["dashboard"][challengeId]["secondConnection"].push(
+              profileObj
+            );
+          } else if (depth == 3) {
+            responseObj["dashboard"][challengeId]["thirdConnection"].push(
+              profileObj
+            );
+          }
+          console.log("END-" + index);
+        });
+      }
+      promises2.push(getChallengeStats(challenge));
+    });
+    await Promise.all(promises2);
+    await tx.commit();
+    await session.close();
+    res.status(200).send(responseObj);
   } catch (err) {
     console.error(err);
     res.sendStatus(500);
@@ -352,4 +500,5 @@ module.exports = {
   participateInChallenge,
   tagUser,
   getTaggingTree,
+  getDashboard,
 };

@@ -19,5 +19,6 @@ router.post("/phoneVerification", userController.addPhoneNumber);
 router.post("/createChallenge", challengeController.createChallenge);
 router.post("/participateChallenge", userController.participateInChallenge);
 router.post("/getTags", userController.getTaggingTree);
+router.post("/getDashboard", userController.getDashboard);
 
 module.exports = router;
