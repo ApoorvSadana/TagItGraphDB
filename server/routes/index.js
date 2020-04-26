@@ -16,10 +16,10 @@ const router = express.Router();
 router.post("/loginWithGoogle", userController.loginWithGoogle);
 router.post("/loginWithFacebook", userController.loginWithFacebook);
 router.post("/phoneVerification", userController.addPhoneNumber);
-router.post("/createChallenge", challengeController.createChallenge);
+router.post("/challenges/add", challengeController.createChallenge);
 router.post("/participateChallenge", userController.participateInChallenge);
 router.post("/getTags", userController.getTaggingTree);
-router.post("/getDashboard", userController.getDashboard);
+router.post("/dashboard", userController.getDashboard);
 router.post("/auth", userController.auth);
 
 module.exports = router;
