@@ -20,5 +20,6 @@ router.post("/createChallenge", challengeController.createChallenge);
 router.post("/participateChallenge", userController.participateInChallenge);
 router.post("/getTags", userController.getTaggingTree);
 router.post("/getDashboard", userController.getDashboard);
+router.post("/auth", userController.auth);
 
 module.exports = router;

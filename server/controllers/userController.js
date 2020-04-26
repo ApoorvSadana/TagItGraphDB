@@ -154,6 +154,15 @@ async function loginWithFacebook(req, res) {
   }
 }
 
+async function auth(req, res) {
+  let type = req.body.type;
+  if (type === "google") {
+    await loginWithGoogle(req, res);
+  } else {
+    await loginWithFacebook(req, res);
+  }
+}
+
 async function addPhoneNumber(req, res) {
   try {
     const session = driver.session();
@@ -501,4 +510,5 @@ module.exports = {
   tagUser,
   getTaggingTree,
   getDashboard,
+  auth,
 };
