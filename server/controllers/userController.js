@@ -295,7 +295,6 @@ async function tagUser(userId, challengeId, taggedPhoneNumber) {
   try {
     const session = driver.session();
     let tx = session.beginTransaction();
-    console.log("HI444!");
     let taggedUser = await tx.run(
       "MATCH (user:User {phoneNumber:$phoneNumber}) RETURN user",
       {
@@ -303,7 +302,6 @@ async function tagUser(userId, challengeId, taggedPhoneNumber) {
       }
     );
     if (taggedUser.records.length === 0) {
-      console.log("HI55!" + taggedPhoneNumber);
       await tx.run(
         "MERGE (tag:TaggedNotOnApp {phoneNumber:$phoneNumber}) \
         WITH tag \
@@ -315,7 +313,6 @@ async function tagUser(userId, challengeId, taggedPhoneNumber) {
           challengeId: challengeId,
         }
       );
-      console.log("HI4666!");
       await tx.commit();
     } else {
       let result = await tx.run(
@@ -327,13 +324,13 @@ async function tagUser(userId, challengeId, taggedPhoneNumber) {
         }
       );
       let alreadyParticipated = result.records[0]._fields[0];
-      console.log(alreadyParticipated);
       if (alreadyParticipated === true) {
         await tx.commit();
         return false;
       }
       await tx.run(
         "MATCH (user:User {id:$userId}),(tag:User {phoneNumber:$phoneNumber}) \
+        WHERE user <> tag \
           MERGE (user)-[:tagged {challengeId:$challengeId}]->(tag) ",
         {
           phoneNumber: taggedPhoneNumber,
