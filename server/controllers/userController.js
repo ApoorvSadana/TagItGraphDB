@@ -1,10 +1,11 @@
 const { v4 } = require("uuid");
 const driver = require("../models");
 const neo4jDriver = require("../utils/neo4jDriver");
+const phoneNumbers = require("../utils/phoneNumbers")
 
 async function loginWithGoogle(req, res) {
   let data = req.body;
-
+  console.log(data);
   const session = driver.session();
   const tx = session.beginTransaction();
   let promises = [];
@@ -23,10 +24,14 @@ async function loginWithGoogle(req, res) {
       )
     );
     let [user, userWithGoogleAuth] = await Promise.all(promises);
+    let expoToken = data.expoToken;
+    if (!expoToken) {
+      expoToken = null;
+    }
     if (user.records.length === 0) {
-      let userId = v4();
+      let userId = data.UUID;
       await tx.run(
-        "CREATE (user:User {id:$id,name:$name,email:$email,profilePicUrl:$profilePicUrl}) \
+        "CREATE (user:User {id:$id,name:$name,email:$email,profilePicUrl:$profilePicUrl,expoToken:$expoToken}) \
                 -[:googleAuthDetails]-> \
                 (googleUser:GoogleUser {id:$id,name:$name,accessToken:$accessToken,idToken:$idToken,refreshToken:$refreshToken,latestResponse:$data})",
         {
@@ -38,6 +43,7 @@ async function loginWithGoogle(req, res) {
           idToken: data.idToken,
           refreshToken: data.refreshToken,
           data: JSON.stringify(data),
+          expoToken: expoToken
         }
       );
       await tx.commit();
@@ -46,7 +52,8 @@ async function loginWithGoogle(req, res) {
       user.records.length !== 0 &&
       userWithGoogleAuth.records.length === 0
     ) {
-      await tx.run(
+      let promises2 = [];
+      promises2.push(tx.run(
         "CREATE (googleUser:GoogleUser {id:$id,name:$name,accessToken:$accessToken,idToken:$idToken,refreshToken:$refreshToken,latestResponse:$data}) \
                 WITH googleUser \
                 MATCH (user:User {email:$email}) \
@@ -60,9 +67,24 @@ async function loginWithGoogle(req, res) {
           refreshToken: data.refreshToken,
           data: JSON.stringify(data),
         }
-      );
+      ));
+      promises2.push(tx.run(
+        "MATCH (user:User {email:$email}) SET user.expoToken = $expoToken",
+        {
+          email: data.user.email,
+          expoToken: expoToken
+        }
+      ));
+      await Promise.all(promises2);
       await tx.commit();
     } else {
+      await tx.run(
+        "MATCH (user:User {email:$email}) SET user.expoToken = $expoToken",
+        {
+          email: data.user.email,
+          expoToken: expoToken
+        }
+      )
       await tx.commit();
       res.status(200).send({
         userId: user.records[0]._fields[0].properties.id,
@@ -100,10 +122,14 @@ async function loginWithFacebook(req, res) {
       )
     );
     let [user, userWithFacebookAuth] = await Promise.all(promises);
+    let expoToken = data.expoToken;
+    if (!expoToken) {
+      expoToken = null;
+    }
     if (user.records.length === 0) {
-      let userId = v4();
+      let userId = data.UUID;
       await tx.run(
-        "CREATE (user:User {id:$id,name:$name,email:$email,profilePicUrl:$profilePicUrl}) \
+        "CREATE (user:User {id:$id,name:$name,email:$email,profilePicUrl:$profilePicUrl,expoToken:$expoToken}) \
                 -[:facebookAuthDetails]-> \
                 (facebookUser:FacebookUser {id:$id,name:$name,accessToken:$accessToken,picture:$picture,latestResponse:$data})",
         {
@@ -114,6 +140,7 @@ async function loginWithFacebook(req, res) {
           accessToken: data.accessToken,
           picture: JSON.stringify(data.picture),
           data: JSON.stringify(data),
+          expoToken: expoToken
         }
       );
       await tx.commit();
@@ -122,7 +149,8 @@ async function loginWithFacebook(req, res) {
       user.records.length !== 0 &&
       userWithFacebookAuth.records.length === 0
     ) {
-      await tx.run(
+      let promises2 = [];
+      promises2.push(tx.run(
         "CREATE (facebookUser:FacebookUser {id:$id,name:$name,accessToken:$accessToken,picture:$picture,latestResponse:$data}) \
                 WITH facebookUser \
                 MATCH (user:User {email:$email}) \
@@ -135,9 +163,24 @@ async function loginWithFacebook(req, res) {
           picture: JSON.stringify(data.picture),
           data: JSON.stringify(data),
         }
-      );
+      ));
+      promises2.push(tx.run(
+        "MATCH (user:User {email:$email}) SET user.expoToken = $expoToken",
+        {
+          email: data.email,
+          expoToken: expoToken
+        }
+      ));
+      await Promise.all(promises2);
       await tx.commit();
     } else {
+      await tx.run(
+        "MATCH (user:User {email:$email}) SET user.expoToken = $expoToken",
+        {
+          email: data.user.email,
+          expoToken: expoToken
+        }
+      )
       await tx.commit();
       res.status(200).send({
         userId: user.records[0]._fields[0].properties.id,
@@ -168,6 +211,9 @@ async function addPhoneNumber(req, res) {
     const session = driver.session();
     let tx = session.beginTransaction();
     let promises = [];
+    console.log('Hi!');
+    console.log(req.body)
+    console.log(req.body.phoneNumber)
     promises.push(
       tx.run("MATCH (user:User {id:$id}) SET user.phoneNumber=$phoneNumber", {
         id: req.body.userId,
@@ -184,6 +230,7 @@ async function addPhoneNumber(req, res) {
     );
     let result = await Promise.all(promises);
     let tagged = result[1];
+    console.log(JSON.stringify(result[0]));
     if (tagged.records.length > 0) {
       let taggedRelations = await tx.run(
         "MATCH (tag:TaggedNotOnApp {phoneNumber:$phoneNumber})-[r]-(node) RETURN tag,r,node",
@@ -277,7 +324,8 @@ async function participateInChallenge(req, res) {
     await tx.commit();
     console.log("HI222!");
     let promises2 = [];
-    data.invites.map((phoneNumber) => {
+    let phoneNumbers = phoneNumbers.formatPhoneNumbers(data.invites);
+    phoneNumbers.map((phoneNumber) => {
       promises2.push(tagUser(data.userId, data.challengeId, phoneNumber));
     });
     await Promise.all(promises2);
@@ -499,6 +547,31 @@ async function getDashboard(req, res) {
   }
 }
 
+async function signOut(req, res) {
+  let userId = req.body.userId;
+  const session = driver.session();
+  let tx = session.beginTransaction();
+  await tx.run(
+    "MATCH (user:User {id:$id}) REMOVE user.expoToken", {
+    id: userId
+  }
+  );
+  await tx.commit();
+  await session.close();
+  res.sendStatus(200);
+}
+
+async function getAllUsers(req, res) {
+  const session = driver.session();
+  let tx = session.beginTransaction();
+  let users = await tx.run(
+    "MATCH (user:User) RETURN COLLECT(user.name)"
+  );
+  await tx.commit();
+  await session.close();
+  res.status(200).send(users.records[0]._fields[0]);
+}
+
 module.exports = {
   loginWithGoogle,
   loginWithFacebook,
@@ -508,4 +581,6 @@ module.exports = {
   getTaggingTree,
   getDashboard,
   auth,
+  signOut,
+  getAllUsers
 };
